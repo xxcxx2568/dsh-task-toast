@@ -618,8 +618,10 @@ function Position-Form {
 
 function Show-Overlay {
   Position-Form
+  $script:targetTop = $form.Top
+  $form.Top = $script:targetTop + 20
   $form.TopMost = $true
-  Log ("show before: visible={0} loc={1},{2} size={3}x{4}" -f $form.Visible, $form.Left, $form.Top, $form.Width, $form.Height)
+  Log ("show before: visible={0} loc={1},{2} target={3} size={4}x{5}" -f $form.Visible, $form.Left, $form.Top, $script:targetTop, $form.Width, $form.Height)
   if (-not $form.Visible) { $form.Show() }
   [ToastWin32]::ShowWindow($form.Handle, 5) | Out-Null
   [ToastWin32]::SetWindowPos($form.Handle, [IntPtr]::new(-1), 0, 0, 0, 0, 0x0001 -bor 0x0002 -bor 0x0010 -bor 0x0040) | Out-Null
@@ -639,18 +641,34 @@ function Show-Overlay {
   Log ("show after: visible={0} winVisible={1}" -f $form.Visible, [ToastWin32]::IsWindowVisible($form.Handle))
   $timer.Stop()
   $timer.Start()
+
+  # 180ms 滑入：从目标位置下方 12px 缓出到目标位置。
+  $script:animStart = [DateTime]::UtcNow
+  $animTimer.Stop()
+  $animTimer.Start()
 }
 
 function Hide-Overlay {
+  if ($script:hiding) { return }
+  $script:hiding = $true
   $timer.Stop()
   $progressTimer.Stop()
+  $animTimer.Stop()
   try { $poll.Stop() } catch {}
   Log ("hide: visible={0} slot={1}" -f $form.Visible, $Slot)
-  if ($form.Visible) { $form.Hide() }
-  if (-not $script:closed) {
-    $script:closed = $true
-    try { $form.Close() } catch {}
+  if (-not $form.Visible) {
+    if (-not $script:closed) {
+      $script:closed = $true
+      try { $form.Close() } catch {}
+    }
+    return
   }
+
+  # 130ms 滑出：向下 12px 后关闭。
+  $script:hideFromTop = $form.Top
+  $script:hideStart = [DateTime]::UtcNow
+  $hideTimer.Stop()
+  $hideTimer.Start()
 }
 
 function Focus-Dsh {
@@ -749,6 +767,38 @@ $progressTimer.Add_Tick({
   $progress.Width = [int]($card.Width * $fraction)
 })
 
+$animTimer = New-Object System.Windows.Forms.Timer
+$animTimer.Interval = 15
+$script:animStart = [DateTime]::UtcNow
+$animTimer.Add_Tick({
+  $elapsed = ([DateTime]::UtcNow - $script:animStart).TotalMilliseconds
+  $t = [Math]::Min(1.0, $elapsed / 180.0)
+  $ease = 1 - [Math]::Pow(1 - $t, 3)
+  $form.Top = $script:targetTop + [int](20 * (1 - $ease))
+  if ($t -ge 1) {
+    $animTimer.Stop()
+    $form.Top = $script:targetTop
+  }
+})
+
+$hideTimer = New-Object System.Windows.Forms.Timer
+$hideTimer.Interval = 15
+$script:hideStart = [DateTime]::UtcNow
+$script:hideFromTop = 0
+$hideTimer.Add_Tick({
+  $elapsed = ([DateTime]::UtcNow - $script:hideStart).TotalMilliseconds
+  $t = [Math]::Min(1.0, $elapsed / 130.0)
+  $ease = $t * $t
+  $form.Top = $script:hideFromTop + [int](20 * $ease)
+  if ($t -ge 1) {
+    $hideTimer.Stop()
+    if (-not $script:closed) {
+      $script:closed = $true
+      try { $form.Close() } catch {}
+    }
+  }
+})
+
 $poll = New-Object System.Windows.Forms.Timer
 $poll.Interval = 250
 $poll.Add_Tick({
@@ -826,6 +876,8 @@ $script:dragging = $false
 $script:dragY = 0
 $script:dragOffset = 0
 $script:closed = $false
+$script:hiding = $false
+$script:targetTop = 0
 
 Apply-State (Read-State)
 $poll.Start()
