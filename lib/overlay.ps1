@@ -2,6 +2,7 @@
   [Parameter(Mandatory = $true)][string]$StatePath,
   [Parameter(Mandatory = $true)][string]$ActionPath,
   [Parameter(Mandatory = $true)][int]$ParentPid,
+  [int]$Slot = 0,
   [string]$LogPath = ''
 )
 
@@ -610,7 +611,9 @@ function Read-State {
 function Position-Form {
   $screen = [System.Windows.Forms.Screen]::FromPoint([System.Windows.Forms.Cursor]::Position)
   $area = $screen.WorkingArea
-  $form.Location = New-Object System.Drawing.Point(($area.Right - $form.Width - 20), ($area.Bottom - $form.Height))
+  $top = $area.Bottom - $form.Height - ([Math]::Max(0, $Slot) * $form.Height)
+  if ($top -lt $area.Top) { $top = $area.Top }
+  $form.Location = New-Object System.Drawing.Point(($area.Right - $form.Width - 20), $top)
 }
 
 function Show-Overlay {
@@ -641,8 +644,13 @@ function Show-Overlay {
 function Hide-Overlay {
   $timer.Stop()
   $progressTimer.Stop()
-  Log ("hide: visible={0}" -f $form.Visible)
+  try { $poll.Stop() } catch {}
+  Log ("hide: visible={0} slot={1}" -f $form.Visible, $Slot)
   if ($form.Visible) { $form.Hide() }
+  if (-not $script:closed) {
+    $script:closed = $true
+    try { $form.Close() } catch {}
+  }
 }
 
 function Focus-Dsh {
@@ -817,6 +825,7 @@ $script:detailMax = 0
 $script:dragging = $false
 $script:dragY = 0
 $script:dragOffset = 0
+$script:closed = $false
 
 Apply-State (Read-State)
 $poll.Start()

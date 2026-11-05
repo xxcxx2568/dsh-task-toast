@@ -13,10 +13,15 @@ Windows 上，DSH 一轮任务结束（`turn/end`）后，会在**屏幕右下�
 - **最终回复预览**：灰色区域只露出几行，右侧白色拖动条或滚轮可看完整内容
 - **查看对话 →**：把 DSH 切到前台并跳到对应会话
 - 底部绿色进度条走完**立即收起**；鼠标停在卡片上会暂停
+- **同一时间最多两个通知上下堆叠**，各自独立计时/关闭/查看对话；第三个到来时最旧的一个让位
 - 子代理结束不打扰；后台运行中的会话会临时保留引用
 - UI 跟随 DSH 明暗主题
 
 ![原生置顶卡片](preview-native.png)
+
+两个通知同时到达时，上下堆叠、各自计时：
+
+![两个通知上下堆叠](preview-dual.png)
 
 非 Windows 平台，或原生窗口启动失败时，会自动回退为 DSH 网页内右下角卡片。
 
@@ -88,7 +93,7 @@ dsh plugin --profile web add "github:xxcxx2568/dsh-task-toast"
 - **点击 ×**：关闭；鼠标悬停会加深
 - **查看对话 →**：聚焦 DSH 并跳到该会话
 - 不操作时，底部绿色进度条走完立即收起；鼠标停在卡片上会暂停计时
-- 新的任务完成会替换旧内容
+- 同一时间最多两个窗口上下堆叠；第三个通知到来时，最旧的一个自动让位
 
 子代理（subagent）结束**不会**弹窗，避免一个任务刷出一串通知；主对话结束时统一提醒。
 
@@ -175,8 +180,8 @@ localStorage.removeItem('dsh-task-toast.prices')
 3. 用量按 `tokenUsage` 投影计算：attach 时读一次作为「插件启动前的历史」，之后 `assistant/message` / `assistant/attempt` 的 usage 按 turn/step 做「同一步替换、不同步累加」，`llm/retry-started` 时清空替换槽
 4. 花费按 `provider/model` 查内置价或 `localStorage` 覆盖价；DeepSeek 按事件时间判断北京时间峰谷
 5. 浏览器先请求 `/api/capabilities`；`systemOverlay: true` 时把标题、完整详情、统计文本和主题 POST 到 `/api/notify`，否则使用网页内卡片
-6. 宿主把状态原子写入 `%TEMP%\dsh-task-toast\state.json`，并启动 `overlay.ps1 -StatePath ... -ActionPath ... -ParentPid <宿主 PID>`。脚本轮询状态文件，更新/显示 TopMost 窗口；DSH 退出后脚本检测父进程并自行退出
-7. 置顶窗口的“查看对话”把 `{type:'open', sessionId}` 写入 `action.json`，浏览器每 900ms 轮询 `/api/actions` 并调用 `ctx.uiWorkspace.openSession`
+6. 每条通知在 `%TEMP%\dsh-task-toast\popup-*` 独立目录写 state/action，并启动一个 `overlay.ps1 -Slot <0|1>` 窗口；最多两个上下堆叠，第三个到来时最旧窗口让位。窗口收起后自行退出，宿主回收目录
+7. 置顶窗口的“查看对话”把 `{type:'open', sessionId}` 写入该窗口的 `action.json`；宿主汇总后由浏览器每 900ms 轮询 `/api/actions`，再调用 `ctx.uiWorkspace.openSession`
 
 ---
 

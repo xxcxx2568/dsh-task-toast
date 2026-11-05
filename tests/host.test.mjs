@@ -1,12 +1,12 @@
 /**
  * 宿主侧集成测试：用 mock ctx 调用 lib/index.js 注册的 HTTP 路由，
- * 验证能力探测、/notify 写状态并启动 Windows 置顶窗口、/actions 与 /dismiss。
+ * 验证能力探测、并发 /notify 打开两个窗口、/actions、/dismiss 与清理。
  *
- * 只在 Windows 上跑；会短暂弹出一个原生置顶窗口，然后清理。
+ * 只在 Windows 上跑；会短暂弹出两个原生置顶窗口，然后清理。
  */
 import assert from 'node:assert/strict'
 import { Readable } from 'node:stream'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import plugin from '../lib/index.js'
@@ -15,6 +15,9 @@ if (process.platform !== 'win32') {
   console.log('skip: Windows only')
   process.exit(0)
 }
+
+const TEST_ROOT = mkdtempSync(join(tmpdir(), 'dsh-task-toast-test-'))
+process.env.DSH_TASK_TOAST_TMP = TEST_ROOT
 
 const routes = new Map()
 const disposers = []
@@ -70,54 +73,79 @@ async function call(path, method, payload) {
   return res
 }
 
-plugin.apply(ctx)
-
-const caps = await call('/capabilities', 'GET')
-assert.equal(caps.statusCode, 200)
-assert.equal(caps.json().systemOverlay, true)
-console.log('ok - capabilities')
-
-const payload = {
-  id: `host-test-${Date.now()}`,
-  sessionId: 'session-host-test',
-  title: '任务已完成',
-  body: '对话已就绪，可以回来继续查看。',
-  sessionTitle: '「宿主侧集成测试」',
-  detail: '第一行\n第二行',
-  tone: 'success',
-  theme: 'dark',
-  timeLabel: '16:10',
-  durationText: '用时 3 秒',
-  labels: { turn: '本次', total: '对话累计', open: '在 DSH 中打开', close: '关闭' },
-  stats: {
-    turnTokensText: '1,234 tokens',
-    turnCostText: '≈¥0.0042',
-    totalTokensText: '5,678 tokens',
-    totalCostText: '≈¥0.0193',
-  },
+function makePayload(suffix) {
+  return {
+    id: `host-test-${suffix}-${Date.now()}`,
+    sessionId: `session-host-test-${suffix}`,
+    title: '任务已完成',
+    body: '对话已就绪，可以回来继续查看。',
+    sessionTitle: `「宿主侧并发测试 ${suffix}」`,
+    detail: `第一行 ${suffix}\n第二行 ${suffix}`,
+    tone: 'success',
+    theme: 'light',
+    timeLabel: '16:10',
+    durationText: '用时 3 秒',
+    labels: { turn: '本次', total: '对话累计', open: '查看对话', close: '关闭' },
+    stats: {
+      turnTokensText: '1,234 tokens',
+      turnCostText: '≈¥0.0042',
+      totalTokensText: '5,678 tokens',
+      totalCostText: '≈¥0.0193',
+    },
+    durationMs: 30000,
+  }
 }
 
-const notify = await call('/notify', 'POST', payload)
-assert.equal(notify.statusCode, 200)
-assert.equal(notify.json().ok, true)
-console.log('ok - notify')
+try {
+  plugin.apply(ctx)
 
-const statePath = join(tmpdir(), 'dsh-task-toast', 'state.json')
-assert.ok(existsSync(statePath), 'state.json should be written')
-const state = JSON.parse(readFileSync(statePath, 'utf8'))
-assert.equal(state.id, payload.id)
-assert.equal(state.detail, payload.detail)
-assert.equal(state.stats.turnTokensText, '1,234 tokens')
-console.log('ok - state file')
+  const caps = await call('/capabilities', 'GET')
+  assert.equal(caps.statusCode, 200)
+  assert.equal(caps.json().systemOverlay, true)
+  console.log('ok - capabilities')
 
-const actions = await call('/actions', 'GET')
-assert.equal(actions.statusCode, 200)
-assert.ok(Array.isArray(actions.json().actions))
-console.log('ok - actions')
+  const firstPayload = makePayload('A')
+  const secondPayload = makePayload('B')
 
-const dismiss = await call('/dismiss', 'POST', {})
-assert.equal(dismiss.statusCode, 200)
-console.log('ok - dismiss')
+  const first = await call('/notify', 'POST', firstPayload)
+  assert.equal(first.statusCode, 200)
+  assert.equal(first.json().ok, true)
+  console.log('ok - notify A')
 
-for (const dispose of disposers.splice(0)) dispose()
-console.log('ok - cleanup')
+  const second = await call('/notify', 'POST', secondPayload)
+  assert.equal(second.statusCode, 200)
+  assert.equal(second.json().ok, true)
+  console.log('ok - notify B')
+
+  const popupDirs = readdirSync(TEST_ROOT).filter((name) => name.startsWith('popup-'))
+  assert.ok(popupDirs.length >= 2, '两个并发通知应各有独立窗口目录')
+
+  const popupStates = popupDirs
+    .map((name) => join(TEST_ROOT, name, 'state.json'))
+    .filter((path) => existsSync(path))
+    .map((path) => JSON.parse(readFileSync(path, 'utf8')))
+
+  const stateA = popupStates.find((state) => state.id === firstPayload.id)
+  const stateB = popupStates.find((state) => state.id === secondPayload.id)
+  assert.ok(stateA, '第一条通知应有自己的 state.json')
+  assert.ok(stateB, '第二条通知应有自己的 state.json')
+  assert.equal(stateA.detail, firstPayload.detail)
+  assert.equal(stateB.detail, secondPayload.detail)
+  console.log('ok - two independent state files')
+
+  const actions = await call('/actions', 'GET')
+  assert.equal(actions.statusCode, 200)
+  assert.ok(Array.isArray(actions.json().actions))
+  console.log('ok - actions')
+
+  const dismiss = await call('/dismiss', 'POST', {})
+  assert.equal(dismiss.statusCode, 200)
+  assert.equal(dismiss.json().ok, true)
+  console.log('ok - dismiss')
+} finally {
+  for (const dispose of disposers.splice(0)) dispose()
+  try {
+    rmSync(TEST_ROOT, { recursive: true, force: true })
+  } catch {}
+  console.log('ok - cleanup')
+}

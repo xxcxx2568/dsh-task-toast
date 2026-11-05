@@ -9,9 +9,10 @@
 ## 数据落在哪里
 
 - 原生窗口状态 / 动作 / 日志：`%TEMP%\dsh-task-toast\`（Windows 临时目录）
-  - `state.json`：会话标题、最终回复、统计文本
-  - `action.json`：窗口按钮动作
-  - `overlay.log`：原生窗口诊断日志
+  - `popup-*\state.json`：该窗口的会话标题、最终回复、统计文本
+  - `popup-*\action.json`：该窗口的按钮动作
+  - `overlay.log`：所有原生窗口共用的诊断日志
+- 同一时间最多两个弹窗；各自收起后，宿主回收对应 `popup-*` 目录。
 - 这些文件只在本机供宿主和 PowerShell 窗口读取；插件停用或 DSH 退出时清理。
 - 插件不向作者或任何第三方服务器上传数据；仅使用本机 loopback HTTP 路由。
 
