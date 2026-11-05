@@ -1,0 +1,6 @@
+# dsh-task-toast 的 bundle patch：把插件行插入 profile 的配置树。
+# 安装：在「插件 → 添加插件 → 本地目录」中选择本目录；或手动把
+# "dsh-task-toast": "link:<本目录绝对路径>" 加进 profile 的依赖与 bundles。
+- insert:
+    - id: dsh-task-toast
+      name: dsh-task-toast
