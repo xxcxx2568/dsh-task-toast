@@ -656,19 +656,12 @@ function Hide-Overlay {
   $animTimer.Stop()
   try { $poll.Stop() } catch {}
   Log ("hide: visible={0} slot={1}" -f $form.Visible, $Slot)
-  if (-not $form.Visible) {
-    if (-not $script:closed) {
-      $script:closed = $true
-      try { $form.Close() } catch {}
-    }
-    return
+  Log 'process exit'
+  try {
+    [System.Diagnostics.Process]::GetCurrentProcess().Kill()
   }
-
-  # 130ms 滑出：向下 12px 后关闭。
-  $script:hideFromTop = $form.Top
-  $script:hideStart = [DateTime]::UtcNow
-  $hideTimer.Stop()
-  $hideTimer.Start()
+  catch {}
+  [Environment]::Exit(0)
 }
 
 function Focus-Dsh {
@@ -719,7 +712,7 @@ function Apply-State($state) {
   $totalCost.Text = [string]$state.stats.totalCostText
   $duration.Text = [string]$state.durationText
 
-  $ms = 15000
+  $ms = 5000
   if ($null -ne $state.durationMs) { $ms = [int]$state.durationMs }
   if ($ms -lt 3000) { $ms = 3000 }
   if ($ms -gt 120000) { $ms = 120000 }
@@ -739,7 +732,7 @@ function Apply-State($state) {
 }
 
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 15000
+$timer.Interval = 5000
 $timer.Add_Tick({
   $timer.Stop()
   $progressTimer.Stop()
@@ -750,7 +743,7 @@ $timer.Add_Tick({
 $progressTimer = New-Object System.Windows.Forms.Timer
 $progressTimer.Interval = 50
 $script:progressElapsed = 0
-$script:progressDuration = 15000
+$script:progressDuration = 5000
 $progressTimer.Add_Tick({
   if (-not $form.Visible) { return }
   $script:progressElapsed += $progressTimer.Interval
@@ -781,23 +774,7 @@ $animTimer.Add_Tick({
   }
 })
 
-$hideTimer = New-Object System.Windows.Forms.Timer
-$hideTimer.Interval = 15
-$script:hideStart = [DateTime]::UtcNow
-$script:hideFromTop = 0
-$hideTimer.Add_Tick({
-  $elapsed = ([DateTime]::UtcNow - $script:hideStart).TotalMilliseconds
-  $t = [Math]::Min(1.0, $elapsed / 130.0)
-  $ease = $t * $t
-  $form.Top = $script:hideFromTop + [int](20 * $ease)
-  if ($t -ge 1) {
-    $hideTimer.Stop()
-    if (-not $script:closed) {
-      $script:closed = $true
-      try { $form.Close() } catch {}
-    }
-  }
-})
+$hideTimer = $null
 
 $poll = New-Object System.Windows.Forms.Timer
 $poll.Interval = 250
@@ -812,14 +789,6 @@ $poll.Add_Tick({
   Apply-State (Read-State)
 })
 
-$form.Add_MouseEnter({ $timer.Stop(); $progressTimer.Stop() })
-$form.Add_MouseLeave({ if ($form.Visible) { $timer.Start(); $progressTimer.Start() } })
-$detailPanel.Add_MouseEnter({ $timer.Stop(); $progressTimer.Stop() })
-$detailPanel.Add_MouseLeave({ if ($form.Visible) { $timer.Start(); $progressTimer.Start() } })
-$detailViewport.Add_MouseEnter({ $timer.Stop(); $progressTimer.Stop() })
-$detailViewport.Add_MouseLeave({ if ($form.Visible) { $timer.Start(); $progressTimer.Start() } })
-$detailLabel.Add_MouseEnter({ $timer.Stop(); $progressTimer.Stop() })
-$detailLabel.Add_MouseLeave({ if ($form.Visible) { $timer.Start(); $progressTimer.Start() } })
 $form.Add_Shown({ Apply-Rounded })
 $form.Add_Resize({ Apply-Rounded })
 
@@ -882,3 +851,5 @@ $script:targetTop = 0
 Apply-State (Read-State)
 $poll.Start()
 [System.Windows.Forms.Application]::Run($form)
+Log 'application run returned'
+[Environment]::Exit(0)

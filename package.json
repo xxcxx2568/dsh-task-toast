@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-toast",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "DSH 任务完成提醒：Windows 原生置顶卡片，显示本次/累计 token 与花费，可滚动查看最终回复。",
   "keywords": [
     "dsh",
